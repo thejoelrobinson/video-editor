@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+package-lock.json
+yarn.lock
+
+# Build output
+# dist/ - keeping dist for GitHub Pages deployment
+build/
+
+# Development
+.DS_Store
+*.swp
+*.swo
+*~
+.vscode
+.idea
+*.iml
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Environment (API keys, secrets)
+.env
+.env.*
+!.env.example
+
+# Testing
+coverage/
+.nyc_output/
+
+# Misc
+.cache/
+.parcel-cache
+.turbo/
