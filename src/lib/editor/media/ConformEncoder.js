@@ -248,9 +248,6 @@ export const conformEncoder = {
         }
         break;
       }
-      case 'log':
-        logger.info(msg.message);
-        break;
       case 'configure_done':
         logger.info('[ConformEncoder] Worker configured');
         break;
@@ -268,32 +265,6 @@ export const conformEncoder = {
         logger.warn('[ConformEncoder] Encode error:', msg.error);
         break;
       case 'flush_done':
-        break;
-      // Export-mode messages
-      case 'export-started':
-        break;
-      case 'export-packet':
-        this._exportPackets.push(msg.data);
-        this._exportPending--;
-        if (this._exportDrainResolve && this._exportPending <= this._exportDrainThreshold) {
-          const resolve = this._exportDrainResolve;
-          this._exportDrainResolve = null;
-          resolve();
-        }
-        break;
-      case 'export-accepted':
-        break;
-      case 'export-flush-done':
-        if (this._exportFlushResolve) {
-          this._exportFlushResolve();
-          this._exportFlushResolve = null;
-        }
-        break;
-      case 'export-ended':
-        break;
-      case 'export-error':
-        logger.warn('[ConformEncoder] Export encode error:', msg.error);
-        this._exportPending--;
         break;
       case 'error':
         logger.warn('[ConformEncoder] Worker error:', msg.error);
@@ -362,12 +333,6 @@ export const conformEncoder = {
 
   // Rebuild packetCache and conformedFrames from sourceCache for a specific sequence.
   _rebuildFrameIndex(seqId) {
-    // Defer rebuilds during export to prevent clearing packetCache while
-    // the export pipeline is reading from it (race condition).
-    if (this._exportPaused) {
-      this._pendingRebuild = seqId;
-      return;
-    }
     const ss = this._getSeqState(seqId);
     ss.packetCache.clear();
     ss.conformedFrames.clear();
@@ -608,84 +573,12 @@ export const conformEncoder = {
 
   pauseForExport() {
     this._exportPaused = true;
-    this._pendingRebuild = null;
     this._stopIdleFill();
   },
 
   resumeAfterExport() {
     this._exportPaused = false;
-    // Flush any rebuild that was deferred during export
-    if (this._pendingRebuild) {
-      const seqId = this._pendingRebuild;
-      this._pendingRebuild = null;
-      this._rebuildFrameIndex(seqId);
-    }
     this._restartIdleFill();
-  },
-
-  // === Export-mode API ===
-  // Routes fresh-encode frames through the SAME ConformWorker encoder that produced
-  // cached packets, guaranteeing identical SPS/PPS for the hybrid bitstream.
-  _exportPackets: [],
-  _exportPending: 0,
-  _exportDrainResolve: null,
-  _exportDrainThreshold: 0,
-  _exportFlushResolve: null,
-
-  startExportMode() {
-    if (!this._worker) return;
-    this._exportPackets = [];
-    this._exportPending = 0;
-    this._worker.postMessage({ type: 'export-start' });
-  },
-
-  exportEncode(bitmap, timestampUs, forceKeyframe) {
-    if (!this._worker) return;
-    this._exportPending++;
-    this._worker.postMessage({
-      type: 'export-encode',
-      bitmap,
-      timestampUs,
-      forceKeyframe: !!forceKeyframe
-    }, [bitmap]);
-  },
-
-  // Backpressure: resolves when in-flight export encodes drop to threshold
-  waitForExportDrain(threshold) {
-    if (this._exportPending <= threshold) return Promise.resolve();
-    this._exportDrainThreshold = threshold;
-    return new Promise(resolve => { this._exportDrainResolve = resolve; });
-  },
-
-  async exportFlush() {
-    if (!this._worker) return;
-    return new Promise(resolve => {
-      this._exportFlushResolve = resolve;
-      this._worker.postMessage({ type: 'export-flush' });
-    });
-  },
-
-  getAndClearExportData() {
-    const packets = this._exportPackets;
-    this._exportPackets = [];
-    const totalSize = packets.reduce((sum, d) => sum + d.byteLength, 0);
-    if (totalSize === 0) return new Uint8Array(0);
-    const result = new Uint8Array(totalSize);
-    let offset = 0;
-    for (const d of packets) {
-      result.set(d, offset);
-      offset += d.byteLength;
-    }
-    return result;
-  },
-
-  endExportMode() {
-    if (!this._worker) return;
-    this._worker.postMessage({ type: 'export-end' });
-    this._exportPackets = [];
-    this._exportPending = 0;
-    this._exportDrainResolve = null;
-    this._exportFlushResolve = null;
   },
 
   _restartIdleFill() {

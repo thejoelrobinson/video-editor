@@ -171,15 +171,6 @@ export const glEffectRenderer = {
     this._canvas.height = height;
     gl.viewport(0, 0, width, height);
 
-    // Use 16-bit float FBOs for color grading precision (prevents banding
-    // from Lumetri curves/contrast/lift-gamma-gain in 8-bit). Falls back
-    // to RGBA8 if the GPU doesn't support float color buffers.
-    if (this._fboFormat === undefined) {
-      const ext = gl.getExtension('EXT_color_buffer_float');
-      this._fboFormat = ext ? gl.RGBA16F : gl.RGBA8;
-      this._fboType = ext ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE;
-    }
-
     // Recreate ping-pong FBOs
     for (let i = 0; i < 2; i++) {
       if (this._fbos[i]) gl.deleteFramebuffer(this._fbos[i]);
@@ -187,7 +178,7 @@ export const glEffectRenderer = {
 
       const tex = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, tex);
-      gl.texImage2D(gl.TEXTURE_2D, 0, this._fboFormat, width, height, 0, gl.RGBA, this._fboType, null);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);

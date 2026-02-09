@@ -1,2 +1,0 @@
-import{l as o,r as i}from"./index-Dpx2ujzF.js";const d={async extractPackets(t,a,r,s=!0){const n=Math.round(a*1e6),c=Math.round(r*1e6);o.info(`[StreamCopy] Extracting packets: media=${t}, ${a.toFixed(3)}s-${r.toFixed(3)}s`);const e=await i.extractPackets(t,n,c,s);return o.info(`[StreamCopy] Extracted ${(e.byteLength/1024).toFixed(0)}KB bitstream`),e}};export{d as streamCopyExtractor};
-//# sourceMappingURL=StreamCopyExtractor-DlJVsPEI.js.map

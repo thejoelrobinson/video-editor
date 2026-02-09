@@ -1,16 +1,12 @@
 // WebCodecs VideoEncoder — hardware-accelerated H.264/VP9 encoding
 import logger from '../../utils/logger.js';
 
-// H.264 QP: 0=lossless, 51=worst. 23 ≈ x264 CRF 23 (excellent quality, no blockiness)
-const QUANTIZER_QP = 18;
-
 export function createWebCodecsEncoder(config) {
   let encoder = null;
   let encodedChunks = [];
   let frameCount = 0;
   let _drainResolve = null;
   let _drainThreshold = 0;
-  let _useQuantizer = false;
 
   const _checkDrain = () => {
     if (_drainResolve && encoder && encoder.encodeQueueSize <= _drainThreshold) {
@@ -20,57 +16,19 @@ export function createWebCodecsEncoder(config) {
     }
   };
 
-  // Build per-frame encode options (adds QP in quantizer mode)
-  const _encodeOpts = (keyFrame) => {
-    const opts = { keyFrame };
-    if (_useQuantizer && config.codec.startsWith('avc1')) {
-      opts.avc = { quantizer: QUANTIZER_QP };
-    }
-    return opts;
-  };
-
   return {
     async init() {
-      const isAvc = config.codec.startsWith('avc1');
-
-      // Try quantizer mode first (constant quality — prevents blockiness)
-      const qConfig = {
+      const encoderConfig = {
         codec: config.codec,
         width: config.width,
         height: config.height,
-        bitrateMode: 'quantizer',
+        bitrate: parseBitrate(config.bitrate),
+        bitrateMode: 'variable',
         framerate: config.fps,
         hardwareAcceleration: 'prefer-hardware',
         latencyMode: 'quality',
-        avc: isAvc ? { format: 'annexb' } : undefined
+        avc: config.codec.startsWith('avc1') ? { format: 'annexb' } : undefined
       };
-
-      try {
-        const qSupport = await VideoEncoder.isConfigSupported(qConfig);
-        if (qSupport.supported) {
-          _useQuantizer = true;
-        }
-      } catch (_) {}
-
-      let encoderConfig;
-      if (_useQuantizer) {
-        encoderConfig = qConfig;
-        logger.info(`WebCodecsEncoder: quantizer mode (QP ${QUANTIZER_QP})`);
-      } else {
-        // VBR fallback — 2x target bitrate ceiling for complex scene headroom
-        encoderConfig = {
-          codec: config.codec,
-          width: config.width,
-          height: config.height,
-          bitrate: parseBitrate(config.bitrate) * 2,
-          bitrateMode: 'variable',
-          framerate: config.fps,
-          hardwareAcceleration: 'prefer-hardware',
-          latencyMode: 'quality',
-          avc: isAvc ? { format: 'annexb' } : undefined
-        };
-        logger.info(`WebCodecsEncoder: VBR mode (${encoderConfig.bitrate / 1000000}Mbps ceiling)`);
-      }
 
       // Check if codec is supported
       const support = await VideoEncoder.isConfigSupported(encoderConfig);
@@ -117,7 +75,7 @@ export function createWebCodecsEncoder(config) {
 
       // Insert keyframe periodically (every 2 seconds)
       const isKeyframe = frameCount % (config.fps * 2) === 0;
-      encoder.encode(frame, _encodeOpts(isKeyframe));
+      encoder.encode(frame, { keyFrame: isKeyframe });
       frame.close();
       frameCount++;
     },
@@ -131,7 +89,7 @@ export function createWebCodecsEncoder(config) {
         duration: Math.round(1000000 / config.fps)
       });
 
-      encoder.encode(frame, _encodeOpts(true));
+      encoder.encode(frame, { keyFrame: true });
       frame.close();
       frameCount++;
     },
@@ -220,9 +178,9 @@ export function isWebCodecsEncodeSupported() {
 // Parse bitrate string like '8M' or '5M' to number
 function parseBitrate(bitrateStr) {
   if (typeof bitrateStr === 'number') return bitrateStr;
-  if (!bitrateStr) return 15000000;
+  if (!bitrateStr) return 5000000;
   const match = String(bitrateStr).match(/^(\d+(?:\.\d+)?)\s*([kKmM])?$/);
-  if (!match) return 15000000;
+  if (!match) return 5000000;
   const num = parseFloat(match[1]);
   const unit = (match[2] || '').toLowerCase();
   if (unit === 'm') return num * 1000000;
