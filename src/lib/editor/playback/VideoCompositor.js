@@ -259,11 +259,21 @@ export const videoCompositor = {
       const def = effectRegistry.get(fx.effectId);
       if (!def || def.type !== 'video') continue;
       const resolvedParams = keyframeEngine.resolveParams(fx, frame);
+      // Replace non-cloneable GL texture handles with raw Uint8Array data for worker
+      // (WebGLTexture objects cause DataCloneError during structured clone)
+      let workerParams = resolvedParams;
+      if (resolvedParams._curveLUT || resolvedParams._hslCurveLUT) {
+        workerParams = { ...resolvedParams };
+        delete workerParams._curveLUT;
+        delete workerParams._hslCurveLUT;
+        // Pass raw LUT data so the worker can upload its own textures
+        // _curveLUTData / _hslCurveLUTData are Uint8Arrays (cloneable)
+      }
       resolvedEffects.push({
         effectId: fx.effectId,
         intrinsic: !!fx.intrinsic,
         type: def.type,
-        resolvedParams
+        resolvedParams: workerParams
       });
     }
 

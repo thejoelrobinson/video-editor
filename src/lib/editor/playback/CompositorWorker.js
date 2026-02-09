@@ -18,6 +18,8 @@ const glRenderer = {
   _width: 0,
   _height: 0,
   _initialized: false,
+  _lutTextures: new Map(),
+  _nextTexUnit: 1,
 
   init() {
     if (this._initialized) return true;
@@ -66,12 +68,14 @@ const glRenderer = {
     if (!program) return null;
     const gl = this._gl;
     const uniforms = {};
+    const uniformTypes = {};
     const numUniforms = gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS);
     for (let i = 0; i < numUniforms; i++) {
       const info = gl.getActiveUniform(program, i);
       uniforms[info.name] = gl.getUniformLocation(program, info.name);
+      uniformTypes[info.name] = info.type;
     }
-    const entry = { program, uniforms };
+    const entry = { program, uniforms, uniformTypes };
     this._programs.set(shaderId, entry);
     return entry;
   },
@@ -82,6 +86,7 @@ const glRenderer = {
     gl.shaderSource(vs, vertSrc);
     gl.compileShader(vs);
     if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
+      console.error('[CompositorWorker] Vertex shader error:', gl.getShaderInfoLog(vs));
       gl.deleteShader(vs);
       return null;
     }
@@ -89,6 +94,7 @@ const glRenderer = {
     gl.shaderSource(fs, fragSrc);
     gl.compileShader(fs);
     if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
+      console.error('[CompositorWorker] Fragment shader error:', gl.getShaderInfoLog(fs));
       gl.deleteShader(vs);
       gl.deleteShader(fs);
       return null;
@@ -100,6 +106,7 @@ const glRenderer = {
     gl.bindAttribLocation(program, 1, 'a_texCoord');
     gl.linkProgram(program);
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      console.error('[CompositorWorker] Program link error:', gl.getProgramInfoLog(program));
       gl.deleteProgram(program);
       gl.deleteShader(vs);
       gl.deleteShader(fs);
@@ -118,12 +125,20 @@ const glRenderer = {
     this._canvas.width = width;
     this._canvas.height = height;
     gl.viewport(0, 0, width, height);
+
+    // 16-bit float FBOs prevent banding from color grading (Lumetri curves etc.)
+    if (this._fboFormat === undefined) {
+      const ext = gl.getExtension('EXT_color_buffer_float');
+      this._fboFormat = ext ? gl.RGBA16F : gl.RGBA8;
+      this._fboType = ext ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE;
+    }
+
     for (let i = 0; i < 2; i++) {
       if (this._fbos[i]) gl.deleteFramebuffer(this._fbos[i]);
       if (this._fboTextures[i]) gl.deleteTexture(this._fboTextures[i]);
       const tex = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, tex);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texImage2D(gl.TEXTURE_2D, 0, this._fboFormat, width, height, 0, gl.RGBA, this._fboType, null);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -167,7 +182,9 @@ void main() {
     const gl = this._gl;
     this._resize(width, height);
     gl.bindTexture(gl.TEXTURE_2D, this._sourceTexture);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, source);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -187,12 +204,23 @@ void main() {
 
   applyEffect(effectId, params) {
     if (!this._initialized || !this._gl) return false;
+
+    // Upload curve LUT textures from raw data if available (transferred from main thread)
+    if (effectId === 'lumetri-color' && params.curves_enabled) {
+      if (params._curveLUTData && !params._curveLUT) {
+        params._curveLUT = this.uploadLUT('lumetri-curve', params._curveLUTData, 256, 1);
+      }
+      if (params._hslCurveLUTData && !params._hslCurveLUT) {
+        params._hslCurveLUT = this.uploadLUT('lumetri-hsl-curve', params._hslCurveLUTData, 256, 5);
+      }
+    }
+
     const config = getEffectConfig(effectId, params);
     if (!config) return false;
     const gl = this._gl;
     for (const passId of config.passes) {
       const prog = this._getProgram(passId);
-      if (!prog) return false;
+      if (!prog) { console.error('[CompositorWorker] Failed to get program for pass:', passId); return false; }
       const readFBO = this._currentFBO;
       const writeFBO = 1 - readFBO;
       gl.bindFramebuffer(gl.FRAMEBUFFER, this._fbos[writeFBO]);
@@ -209,12 +237,26 @@ void main() {
       for (const [name, value] of Object.entries(config.uniforms)) {
         const loc = prog.uniforms[name];
         if (loc === undefined) continue;
+        // Bind texture uniforms (LUTs uploaded via worker's uploadLUT)
+        if (value && typeof value === 'object' && value._isTexture) {
+          gl.activeTexture(gl.TEXTURE0 + value._textureUnit);
+          gl.bindTexture(gl.TEXTURE_2D, value._texture);
+          gl.uniform1i(loc, value._textureUnit);
+          continue;
+        }
         if (Array.isArray(value)) {
           if (value.length === 2) gl.uniform2fv(loc, value);
           else if (value.length === 3) gl.uniform3fv(loc, value);
           else if (value.length === 4) gl.uniform4fv(loc, value);
+        } else if (typeof value === 'boolean') {
+          gl.uniform1i(loc, value ? 1 : 0);
         } else {
-          gl.uniform1f(loc, value);
+          const uType = prog.uniformTypes[name];
+          if (uType === gl.INT || uType === gl.BOOL || uType === gl.SAMPLER_2D) {
+            gl.uniform1i(loc, value);
+          } else {
+            gl.uniform1f(loc, value);
+          }
         }
       }
       gl.bindVertexArray(this._quadVAO);
@@ -241,6 +283,30 @@ void main() {
 
   hasShader(effectId) {
     return GL_SUPPORTED_EFFECTS.has(effectId);
+  },
+
+  uploadLUT(key, data, width, height = 1) {
+    if (!this._initialized || !this._gl) return null;
+    const gl = this._gl;
+    let entry = this._lutTextures.get(key);
+    if (!entry) {
+      const texture = gl.createTexture();
+      const unit = this._nextTexUnit++;
+      entry = { texture, unit };
+      this._lutTextures.set(key, entry);
+    }
+    gl.activeTexture(gl.TEXTURE0 + entry.unit);
+    gl.bindTexture(gl.TEXTURE_2D, entry.texture);
+    if (data.length === width * height * 4) {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+    } else {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, width, height, 0, gl.RED, gl.UNSIGNED_BYTE, data);
+    }
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return { _isTexture: true, _texture: entry.texture, _textureUnit: entry.unit };
   },
 
   // Composite the current FBO result onto the display canvas with motion transform

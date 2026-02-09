@@ -10,12 +10,13 @@
     "preview": "vite preview"
   },
   "license": "MIT",
+  "devDependencies": {
+    "vite": "^5.0.8"
+  },
   "dependencies": {
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.2",
+    "mediabunny": "^1.32.2",
     "mp4box": "^2.3.0"
-  },
-  "devDependencies": {
-    "vite": "^5.0.8"
   }
 }

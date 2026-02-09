@@ -25,7 +25,8 @@ const PANEL_LABELS = {
   'effect-controls': 'Effect Controls',
   'audio-meters': 'Audio Meters',
   'sequence-settings': 'Sequence Settings',
-  'timeline': 'Timeline'
+  'timeline': 'Timeline',
+  'lumetri-color': 'Lumetri Color'
 };
 
 let _nextId = 1;

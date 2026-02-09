@@ -258,8 +258,7 @@ export const timelineClipUI = {
     const mediaItem = mediaManager.getItem(clip.mediaId);
     const track = timelineEngine.getTrack(clip.trackId);
     const isAudio = track && track.type === 'audio';
-    const color = clip.color || '#4a90d9';
-    el.style.backgroundColor = color;
+    if (clip.color) el.style.backgroundColor = clip.color;
 
     if (isAudio) el.classList.add('audio');
     else el.classList.add('video');

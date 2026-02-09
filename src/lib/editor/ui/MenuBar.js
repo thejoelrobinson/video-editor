@@ -68,6 +68,7 @@ const MENU_DEFS = [
       { label: 'Project Panel', action: 'win:project', checkable: 'project' },
       { label: 'Effects Panel', action: 'win:effects', checkable: 'effects' },
       { label: 'Properties Panel', action: 'win:properties', checkable: 'properties' },
+      { label: 'Lumetri Color', action: 'win:lumetri', checkable: 'lumetri-color' },
       { type: 'divider' },
       { label: 'Reset Layout', action: 'win:reset' }
     ]
@@ -291,6 +292,9 @@ export const menuBar = {
         break;
       case 'win:properties':
         dockManager.togglePanel('properties');
+        break;
+      case 'win:lumetri':
+        dockManager.togglePanel('lumetri-color');
         break;
       case 'win:reset':
         dockManager.applyPreset('editing');

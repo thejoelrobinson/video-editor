@@ -16,6 +16,8 @@ export const glEffectRenderer = {
   _initialized: false,
   _supportChecked: false,
   _supported: false,
+  _lutTextures: new Map(),  // key -> { texture, unit }
+  _nextTexUnit: 1,          // TEXTURE0 is reserved for source
 
   isSupported() {
     if (this._supportChecked) return this._supported;
@@ -100,16 +102,18 @@ export const glEffectRenderer = {
     const program = this._compileProgram(VERTEX_SHADER, fragSrc);
     if (!program) return null;
 
-    // Cache all uniform locations
+    // Cache all uniform locations and types
     const gl = this._gl;
     const uniforms = {};
+    const uniformTypes = {};
     const numUniforms = gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS);
     for (let i = 0; i < numUniforms; i++) {
       const info = gl.getActiveUniform(program, i);
       uniforms[info.name] = gl.getUniformLocation(program, info.name);
+      uniformTypes[info.name] = info.type;
     }
 
-    const entry = { program, uniforms };
+    const entry = { program, uniforms, uniformTypes };
     this._programs.set(shaderId, entry);
     return entry;
   },
@@ -167,6 +171,15 @@ export const glEffectRenderer = {
     this._canvas.height = height;
     gl.viewport(0, 0, width, height);
 
+    // Use 16-bit float FBOs for color grading precision (prevents banding
+    // from Lumetri curves/contrast/lift-gamma-gain in 8-bit). Falls back
+    // to RGBA8 if the GPU doesn't support float color buffers.
+    if (this._fboFormat === undefined) {
+      const ext = gl.getExtension('EXT_color_buffer_float');
+      this._fboFormat = ext ? gl.RGBA16F : gl.RGBA8;
+      this._fboType = ext ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE;
+    }
+
     // Recreate ping-pong FBOs
     for (let i = 0; i < 2; i++) {
       if (this._fbos[i]) gl.deleteFramebuffer(this._fbos[i]);
@@ -174,7 +187,7 @@ export const glEffectRenderer = {
 
       const tex = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, tex);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texImage2D(gl.TEXTURE_2D, 0, this._fboFormat, width, height, 0, gl.RGBA, this._fboType, null);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -201,7 +214,10 @@ export const glEffectRenderer = {
     this._resize(width, height);
 
     gl.bindTexture(gl.TEXTURE_2D, this._sourceTexture);
+    // Flip Y so canvas top-row maps to GL texture top (texCoord y=1)
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, source);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -290,12 +306,25 @@ void main() {
         const loc = prog.uniforms[name];
         if (loc === undefined) continue;
 
-        if (Array.isArray(value)) {
+        // Texture uniform (LUT handle from uploadLUT)
+        if (value && typeof value === 'object' && value._isTexture) {
+          gl.activeTexture(gl.TEXTURE0 + value._textureUnit);
+          gl.bindTexture(gl.TEXTURE_2D, value._texture);
+          gl.uniform1i(loc, value._textureUnit);
+        } else if (Array.isArray(value)) {
           if (value.length === 2) gl.uniform2fv(loc, value);
           else if (value.length === 3) gl.uniform3fv(loc, value);
           else if (value.length === 4) gl.uniform4fv(loc, value);
+        } else if (typeof value === 'boolean') {
+          gl.uniform1i(loc, value ? 1 : 0);
         } else {
-          gl.uniform1f(loc, value);
+          // Use cached uniform type for correct dispatch
+          const uType = prog.uniformTypes[name];
+          if (uType === gl.INT || uType === gl.BOOL || uType === gl.SAMPLER_2D) {
+            gl.uniform1i(loc, value);
+          } else {
+            gl.uniform1f(loc, value);
+          }
         }
       }
 
@@ -330,6 +359,42 @@ void main() {
     targetCtx.drawImage(this._canvas, 0, 0);
   },
 
+  /**
+   * Upload a LUT as a GL texture. Returns a handle object for use as a uniform value.
+   * @param {string} key - Cache key (e.g. 'curveLUT', 'hslCurveLUT')
+   * @param {Uint8Array} data - Pixel data
+   * @param {number} width - Texture width
+   * @param {number} height - Texture height (default 1)
+   * @returns {{ _isTexture: true, _texture: WebGLTexture, _textureUnit: number }}
+   */
+  uploadLUT(key, data, width, height = 1) {
+    if (!this._initialized || !this._gl) return null;
+    const gl = this._gl;
+
+    let entry = this._lutTextures.get(key);
+    if (!entry) {
+      const texture = gl.createTexture();
+      const unit = this._nextTexUnit++;
+      entry = { texture, unit };
+      this._lutTextures.set(key, entry);
+    }
+
+    gl.activeTexture(gl.TEXTURE0 + entry.unit);
+    gl.bindTexture(gl.TEXTURE_2D, entry.texture);
+    // Choose format based on data size: RGBA for 4-channel, R8 for single-channel
+    if (data.length === width * height * 4) {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+    } else {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, width, height, 0, gl.RED, gl.UNSIGNED_BYTE, data);
+    }
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+    return { _isTexture: true, _texture: entry.texture, _textureUnit: entry.unit };
+  },
+
   hasShader(effectId) {
     return GL_SUPPORTED_EFFECTS.has(effectId);
   },
@@ -352,6 +417,13 @@ void main() {
 
     if (this._sourceTexture) gl.deleteTexture(this._sourceTexture);
     this._sourceTexture = null;
+
+    // Clean up LUT textures
+    for (const [, entry] of this._lutTextures) {
+      gl.deleteTexture(entry.texture);
+    }
+    this._lutTextures.clear();
+    this._nextTexUnit = 1;
 
     if (this._quadVAO) gl.deleteVertexArray(this._quadVAO);
     this._quadVAO = null;

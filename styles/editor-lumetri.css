@@ -1,0 +1,377 @@
+/* ===== Lumetri Color Panel ===== */
+
+.nle-lumetri-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  font-size: 11px;
+  color: #d4d4d4;
+}
+
+.nle-lumetri-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0;
+}
+
+.nle-lumetri-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #888;
+  font-size: 12px;
+  text-align: center;
+  padding: 20px;
+}
+
+/* ===== Sections ===== */
+
+.lumetri-section {
+  border-bottom: 1px solid #333;
+}
+
+.lumetri-section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  user-select: none;
+  background: #2a2a2a;
+}
+
+.lumetri-section-header:hover {
+  background: #333;
+}
+
+.lumetri-section-toggle {
+  width: 12px;
+  height: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: #999;
+  transition: transform 0.15s;
+}
+
+.lumetri-section.collapsed .lumetri-section-toggle {
+  transform: rotate(-90deg);
+}
+
+.lumetri-section-enable {
+  width: 14px;
+  height: 14px;
+  accent-color: #4a90d9;
+  cursor: pointer;
+  margin: 0;
+}
+
+.lumetri-section-title {
+  flex: 1;
+  font-weight: 600;
+  font-size: 11px;
+  color: #d4d4d4;
+}
+
+.lumetri-section-body {
+  padding: 6px 10px 10px;
+}
+
+.lumetri-section.collapsed .lumetri-section-body {
+  display: none;
+}
+
+/* ===== Slider Rows ===== */
+
+.lumetri-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  height: 22px;
+}
+
+.lumetri-row-label {
+  width: 80px;
+  min-width: 80px;
+  font-size: 10px;
+  color: #aaa;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lumetri-row-slider {
+  flex: 1;
+  min-width: 60px;
+  height: 3px;
+  accent-color: #4a90d9;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  background: #444;
+  border-radius: 2px;
+  outline: none;
+}
+
+.lumetri-row-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #4a90d9;
+  cursor: pointer;
+  border: 1px solid #222;
+}
+
+.lumetri-row-value {
+  width: 42px;
+  min-width: 42px;
+  font-size: 10px;
+  color: #ccc;
+  text-align: right;
+  font-family: monospace;
+}
+
+/* ===== Color Picker Row ===== */
+
+.lumetri-color-input {
+  width: 24px;
+  height: 18px;
+  border: 1px solid #555;
+  border-radius: 2px;
+  cursor: pointer;
+  padding: 0;
+  background: none;
+}
+
+/* ===== Sub-headers ===== */
+
+.lumetri-sub-header {
+  font-size: 10px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 8px 0 4px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid #333;
+}
+
+/* ===== Curve Editor ===== */
+
+.lumetri-curve-editor {
+  margin: 4px 0;
+}
+
+.lumetri-curve-tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 4px;
+}
+
+.lumetri-curve-tab {
+  background: #2a2a2a;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #999;
+  font-size: 10px;
+  padding: 3px 8px;
+  cursor: pointer;
+  border-radius: 2px 2px 0 0;
+}
+
+.lumetri-curve-tab:hover {
+  color: #d4d4d4;
+  background: #333;
+}
+
+.lumetri-curve-tab.active {
+  color: #fff;
+  background: #333;
+  border-bottom-color: currentColor;
+}
+
+.lumetri-curve-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  border: 1px solid #444;
+  border-radius: 2px;
+  cursor: crosshair;
+}
+
+/* ===== Color Wheels ===== */
+
+.lumetri-wheels-container {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.lumetri-color-wheel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  min-width: 100px;
+  max-width: 140px;
+}
+
+.lumetri-wheel-label {
+  font-size: 10px;
+  color: #aaa;
+  margin-bottom: 4px;
+  text-align: center;
+}
+
+.lumetri-wheel-canvas {
+  display: block;
+  width: 100%;
+  max-width: 120px;
+  height: auto;
+  aspect-ratio: 1;
+  cursor: crosshair;
+  border-radius: 50%;
+}
+
+.lumetri-wheel-luma {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.lumetri-wheel-luma-slider {
+  width: 100%;
+  height: 3px;
+  accent-color: #4a90d9;
+  cursor: pointer;
+}
+
+/* ===== Range Selector (HSL Secondary) ===== */
+
+.lumetri-range-selector {
+  margin-bottom: 8px;
+}
+
+.lumetri-range-label {
+  font-size: 10px;
+  color: #aaa;
+  margin-bottom: 3px;
+}
+
+.lumetri-range-track {
+  position: relative;
+  height: 18px;
+  border-radius: 3px;
+  border: 1px solid #444;
+  cursor: pointer;
+  overflow: visible;
+}
+
+.lumetri-range-region {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: rgba(74, 144, 217, 0.3);
+  border-left: 1px solid rgba(74, 144, 217, 0.7);
+  border-right: 1px solid rgba(74, 144, 217, 0.7);
+  pointer-events: none;
+}
+
+.lumetri-range-handle {
+  position: absolute;
+  top: -2px;
+  width: 8px;
+  height: calc(100% + 4px);
+  transform: translateX(-50%);
+  cursor: ew-resize;
+  border-radius: 2px;
+  z-index: 1;
+}
+
+.lumetri-range-handle-low,
+.lumetri-range-handle-high {
+  background: rgba(255, 255, 255, 0.4);
+  border: 1px solid #888;
+}
+
+.lumetri-range-handle-center {
+  width: 6px;
+  background: #4a90d9;
+  border: 1px solid #6aadee;
+}
+
+.lumetri-range-handle:hover {
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.lumetri-range-value {
+  font-size: 10px;
+  color: #888;
+  text-align: center;
+  margin-top: 2px;
+}
+
+/* ===== Checkbox Row ===== */
+
+.lumetri-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  height: 22px;
+}
+
+.lumetri-checkbox-row input[type="checkbox"] {
+  accent-color: #4a90d9;
+  cursor: pointer;
+}
+
+.lumetri-checkbox-row label {
+  font-size: 10px;
+  color: #aaa;
+  cursor: pointer;
+}
+
+/* ===== Reset Button ===== */
+
+.lumetri-reset-btn {
+  background: none;
+  border: 1px solid #555;
+  color: #999;
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 2px;
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.lumetri-reset-btn:hover {
+  color: #d4d4d4;
+  border-color: #888;
+}
+
+/* ===== Scrollbar ===== */
+
+.nle-lumetri-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.nle-lumetri-content::-webkit-scrollbar-track {
+  background: #1e1e1e;
+}
+
+.nle-lumetri-content::-webkit-scrollbar-thumb {
+  background: #444;
+  border-radius: 3px;
+}
+
+.nle-lumetri-content::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}

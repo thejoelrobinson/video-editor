@@ -20,7 +20,8 @@ export const timelineTrackUI = {
 
     // Header
     const header = document.createElement('div');
-    header.className = 'nle-track-header';
+    header.className = `nle-track-header ${track.type}`;
+    row.dataset.trackType = track.type;
 
     const nameEl = document.createElement('span');
     nameEl.className = 'nle-track-name';

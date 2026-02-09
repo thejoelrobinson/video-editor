@@ -36,10 +36,12 @@ export const effectRegistry = {
     const def = registry.get(effectId);
     if (!def) return null;
 
-    // Clone default params
+    // Deep-clone default params (arrays like curve points must not share references)
     const params = {};
     for (const p of def.params) {
-      params[p.id] = p.default;
+      params[p.id] = (typeof p.default === 'object' && p.default !== null)
+        ? JSON.parse(JSON.stringify(p.default))
+        : p.default;
     }
 
     return {

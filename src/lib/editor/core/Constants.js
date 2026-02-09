@@ -77,7 +77,7 @@ export function getAvcCodecForResolution(width, height) {
 }
 
 export const DEFAULT_SEQUENCE_CODEC = SEQUENCE_CODECS.H264;
-export const DEFAULT_SEQUENCE_BITRATE = '8M';
+export const DEFAULT_SEQUENCE_BITRATE = '15M';
 
 export const SEQUENCE_BITRATE_OPTIONS = ['5M', '8M', '15M', '25M', '50M'];
 
@@ -150,7 +150,9 @@ export const EDITOR_EVENTS = {
   SEQUENCE_CREATED: 'sequence:created',
   SEQUENCE_DELETED: 'sequence:deleted',
   // Timecode
-  GOTO_TIMECODE: 'goto:timecode'
+  GOTO_TIMECODE: 'goto:timecode',
+  // Lumetri
+  LUMETRI_UPDATED: 'lumetri:updated'
 };
 
 // Split-tree workspace presets for DockManager
@@ -173,7 +175,7 @@ export const WORKSPACE_PRESETS = {
                 id: _id(), type: 'split', direction: 'h', ratio: 0.65,
                 children: [
                   { id: _id(), type: 'group', tabs: ['program-monitor'], activeTab: 'program-monitor' },
-                  { id: _id(), type: 'group', tabs: ['properties', 'audio-meters', 'sequence-settings'], activeTab: 'properties' }
+                  { id: _id(), type: 'group', tabs: ['properties', 'lumetri-color', 'audio-meters', 'sequence-settings'], activeTab: 'properties' }
                 ]
               }
             ]
@@ -194,9 +196,15 @@ export const WORKSPACE_PRESETS = {
     tree: () => {
       _pid = 1;
       return {
-        id: _id(), type: 'split', direction: 'v', ratio: 0.5,
+        id: _id(), type: 'split', direction: 'v', ratio: 0.55,
         children: [
-          { id: _id(), type: 'group', tabs: ['program-monitor'], activeTab: 'program-monitor' },
+          {
+            id: _id(), type: 'split', direction: 'h', ratio: 0.55,
+            children: [
+              { id: _id(), type: 'group', tabs: ['program-monitor'], activeTab: 'program-monitor' },
+              { id: _id(), type: 'group', tabs: ['lumetri-color'], activeTab: 'lumetri-color' }
+            ]
+          },
           {
             id: _id(), type: 'split', direction: 'h', ratio: 0.3,
             children: [

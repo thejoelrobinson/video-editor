@@ -29,12 +29,15 @@ import { EDITOR_EVENTS } from './core/Constants.js';
 import { renderAheadManager } from './media/RenderAheadManager.js';
 import { conformEncoder } from './media/ConformEncoder.js';
 import { sequenceSettingsPanel } from './ui/SequenceSettingsPanel.js';
+import { lumetriColorPanel } from './ui/LumetriColorPanel.js';
+import { transformOverlay } from './ui/TransformOverlay.js';
 import { waveformCanvasPool } from './ui/CanvasPool.js';
 import { rafScheduler } from './core/RafScheduler.js';
 // Register all effects (side-effect imports)
 import './effects/VideoEffects.js';
 import './effects/AudioEffects.js';
 import './effects/Transitions.js';
+import './effects/LumetriEffect.js';
 
 let initialized = false;
 
@@ -79,6 +82,12 @@ export function initEditor() {
     const el = dockManager.getPanelContentEl('program-monitor');
     if (!el) { logger.warn('[Editor] program-monitor panel not found, skipping ProgramMonitor'); return; }
     programMonitor.init(el);
+  });
+
+  // Init transform overlay (must come after ProgramMonitor)
+  tryInit('TransformOverlay', () => {
+    const el = dockManager.getPanelContentEl('program-monitor');
+    if (el) transformOverlay.init(el);
   });
 
   // Init source monitor
@@ -172,6 +181,13 @@ export function initEditor() {
     sequenceSettingsPanel.init(el);
   });
 
+  // Init Lumetri Color panel
+  tryInit('LumetriColorPanel', () => {
+    const el = dockManager.getPanelContentEl('lumetri-color');
+    if (!el) { logger.warn('[Editor] lumetri-color panel not found, skipping LumetriColorPanel'); return; }
+    lumetriColorPanel.init(el);
+  });
+
   // Init playback engine (register with RAF scheduler)
   tryInit('PlaybackEngine', () => {
     playbackEngine.init();
@@ -255,10 +271,12 @@ export function destroyEditor() {
 
   playbackEngine.pause();
   projectManager.stopAutosave();
+  transformOverlay.cleanup();
   audioMetersPanel.destroy();
   propertiesPanel.destroy();
   basicPropertiesPanel.destroy();
   sequenceSettingsPanel.destroy();
+  lumetriColorPanel.destroy();
   dockManager.destroy();
   timelineToolbar.cleanup();
   rafScheduler.cleanup();

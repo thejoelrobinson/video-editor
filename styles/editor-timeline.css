@@ -18,6 +18,7 @@
 .nle-tl-toolbar-left {
   width: 180px;
   min-width: 180px;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 1px;
@@ -139,6 +140,7 @@
 .nle-track-header {
   width: 180px;
   min-width: 180px;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -279,13 +281,15 @@
 
 .nle-clip-label {
   position: absolute;
-  top: 2px;
-  left: 4px;
-  right: 4px;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 2px 4px;
   font-size: 10px;
   font-weight: 500;
+  line-height: 14px;
   color: #fff;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.5);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

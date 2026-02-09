@@ -3,6 +3,18 @@ import { DEFAULT_FRAME_RATE, DEFAULT_CANVAS, DEFAULT_SEQUENCE_CODEC, DEFAULT_SEQ
 
 export const PROJECT_VERSION = 2;
 
+// Strip non-serializable params (WebGLTexture handles, raw typed arrays used as
+// transient GPU data). Keys prefixed with '_' are runtime-only and must not be
+// persisted to IndexedDB (structured clone throws on WebGLTexture).
+function filterSerializableParams(params) {
+  const out = {};
+  for (const key of Object.keys(params)) {
+    if (key.startsWith('_')) continue;
+    out[key] = params[key];
+  }
+  return out;
+}
+
 function serializeTracks(tracks) {
   return tracks.map(track => ({
     id: track.id,
@@ -30,7 +42,7 @@ function serializeTracks(tracks) {
         name: fx.name,
         enabled: fx.enabled,
         intrinsic: fx.intrinsic || false,
-        params: { ...fx.params },
+        params: filterSerializableParams(fx.params),
         keyframes: fx.keyframes ? JSON.parse(JSON.stringify(fx.keyframes)) : {}
       }))
     }))

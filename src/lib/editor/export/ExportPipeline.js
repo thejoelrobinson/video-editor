@@ -346,98 +346,154 @@ export const exportPipeline = {
       }
     }
 
-    // === Hybrid path: mix conformed packets with freshly encoded render segments ===
-    if (conformFrames > 0 && conformFrames < totalFrames) {
+    // === Hybrid path: disabled ===
+    // Mixing cached Annex B packets with freshly encoded segments from the same
+    // encoder is theoretically possible but fragile in practice: B-frame reordering
+    // across flush boundaries, reference chain breaks at segment transitions, and
+    // missing-packet gaps all cause intermittent decoder artifacts. The complexity
+    // isn't worth it — the full encode path below uses pre-decoded frames from
+    // renderAheadManager + hardware encoding (~500fps), so it's still fast.
+    //
+    // Instant export is handled by the 100% conform fast path above (all packets
+    // from a single contiguous encoding sequence = no mixing issues).
+    if (false && conformFrames > 0 && conformFrames < totalFrames) {
       try {
-        const hybridEncoder = createWebCodecsEncoder({
-          codec: exportCodec,
-          width: preset.width, height: preset.height,
-          bitrate: preset.videoBitrate, fps
-        });
-        await hybridEncoder.init();
-
         mediaDecoder.startSequentialMode();
         mediaDecoder.setExportMode(true);
 
-        const hybridCanvas = document.createElement('canvas');
-        hybridCanvas.width = preset.width;
-        hybridCanvas.height = preset.height;
+        // Deterministic flush: switch to export mode first, then flush the encoder
+        // to drain any in-flight idle-fill encodes. Discard the flushed packets
+        // (they'll be re-encoded on next idle fill after export).
+        conformEncoder.startExportMode();
+        await conformEncoder.exportFlush();
+        conformEncoder.getAndClearExportData(); // discard stale idle-fill output
+
+        const hybridCanvas = new OffscreenCanvas(preset.width, preset.height);
         const hybridCtx = hybridCanvas.getContext('2d');
 
-        const outputParts = []; // ordered array of Uint8Array segments
+        const outputParts = [];
         let encoded = 0;
+        let hadRenderSegment = false; // tracks whether decoder chain was broken
         const BATCH = 30;
 
         onProgress?.({ stage: 'encoding', progress: 0,
-          message: `Hybrid export: ${conformPct}% conformed + ${renderPct}% encode` });
+          message: `Hybrid export: ${conformPct}% cached + ${renderPct}% encode` });
+
+        // Helper: encode a range of frames through the ConformWorker
+        const encodeRange = async (start, end, forceFirstKeyframe) => {
+          const len = end - start;
+          if (len <= 0) return;
+          await renderAheadManager.ensureBuffered(start, Math.min(BATCH, len));
+
+          let prefetchPromise = null;
+          const prefetchNext = (from) => {
+            const remaining = end - from;
+            if (remaining > 0) {
+              prefetchPromise = renderAheadManager.ensureBuffered(from, Math.min(BATCH, remaining))
+                .catch(err => logger.warn('[Export] Hybrid pre-buffer failed:', err));
+            } else {
+              prefetchPromise = null;
+            }
+          };
+          prefetchNext(start + BATCH);
+
+          let segEncoded = 0;
+          for (let f = start; f < end; f++) {
+            if (this._cancelled) throw new Error('Export cancelled');
+            await conformEncoder.waitForExportDrain(8);
+
+            if (segEncoded > 0 && segEncoded % BATCH === 0) {
+              if (prefetchPromise) await prefetchPromise;
+              prefetchNext(f + BATCH);
+            }
+
+            await videoCompositor.compositeFrameTo(f, hybridCtx, preset.width, preset.height);
+            const timestampUs = Math.round((encoded / fps) * 1000000);
+            const bitmap = hybridCanvas.transferToImageBitmap();
+            const forceKey = (f === start && forceFirstKeyframe);
+            conformEncoder.exportEncode(bitmap, timestampUs, forceKey);
+            encoded++;
+            segEncoded++;
+
+            onProgress?.({ stage: 'encoding', progress: encoded / totalFrames,
+              message: `Hybrid: ${encoded}/${totalFrames} frames` });
+          }
+
+          await conformEncoder.exportFlush();
+          outputParts.push(conformEncoder.getAndClearExportData());
+        };
 
         try {
-          for (const seg of segments) {
+          for (let si = 0; si < segments.length; si++) {
+            const seg = segments[si];
             if (this._cancelled) throw new Error('Export cancelled');
 
             if (seg.type === 'conform-copy') {
-              // Pull pre-encoded packets from cache
-              for (let f = seg.start; f < seg.end; f++) {
-                const packet = conformEncoder.getPacket(f);
-                if (packet) outputParts.push(packet.data);
-                encoded++;
-              }
-            } else {
-              // Render segment — composite + encode with rolling prefetch
-              const segLen = seg.end - seg.start;
-              await renderAheadManager.ensureBuffered(seg.start, Math.min(BATCH, segLen));
+              // After a render segment, the decoder's reference chain was broken.
+              // Conform-copy packets MUST start on an IDR keyframe to reset the
+              // decoder's DPB. The first segment of the export doesn't need this
+              // (decoder starts fresh).
+              const needsKeyframeAlignment = hadRenderSegment;
 
-              let prefetchPromise = null;
-              const prefetchNext = (from) => {
-                const remaining = seg.end - from;
-                if (remaining > 0) {
-                  prefetchPromise = renderAheadManager.ensureBuffered(from, Math.min(BATCH, remaining))
-                    .catch(err => logger.warn('[Export] Hybrid pre-buffer failed:', err));
+              if (!needsKeyframeAlignment) {
+                // First segment or only conform segments so far — push all cached packets
+                let missing = 0;
+                for (let f = seg.start; f < seg.end; f++) {
+                  const packet = conformEncoder.getPacket(f);
+                  if (packet) {
+                    outputParts.push(packet.data);
+                  } else {
+                    missing++;
+                  }
+                  encoded++;
+                }
+                if (missing > 0) {
+                  logger.warn(`[Export] Conform segment ${seg.start}-${seg.end}: ${missing} missing packets`);
+                }
+              } else {
+                // Find first keyframe in cached packets for this segment
+                let keyStart = -1;
+                for (let f = seg.start; f < seg.end; f++) {
+                  const pkt = conformEncoder.getPacket(f);
+                  if (pkt && pkt.isKeyframe) { keyStart = f; break; }
+                }
+
+                if (keyStart < 0) {
+                  // No keyframe in segment — encode entire segment fresh
+                  logger.info(`[Export] No keyframe in conform segment ${seg.start}-${seg.end}, encoding fresh`);
+                  await encodeRange(seg.start, seg.end, true);
                 } else {
-                  prefetchPromise = null;
+                  // Encode leading non-keyframe frames fresh
+                  if (keyStart > seg.start) {
+                    logger.info(`[Export] Encoding ${keyStart - seg.start} leading frames before keyframe at ${keyStart}`);
+                    await encodeRange(seg.start, keyStart, true);
+                  }
+
+                  // Push cached packets from keyframe onward (instant)
+                  let missing = 0;
+                  for (let f = keyStart; f < seg.end; f++) {
+                    const packet = conformEncoder.getPacket(f);
+                    if (packet) {
+                      outputParts.push(packet.data);
+                    } else {
+                      missing++;
+                    }
+                    encoded++;
+                  }
+                  if (missing > 0) {
+                    logger.warn(`[Export] Conform segment ${keyStart}-${seg.end}: ${missing} missing packets`);
+                  }
                 }
-              };
-              prefetchNext(seg.start + BATCH);
-
-              let segEncoded = 0;
-              for (let f = seg.start; f < seg.end; f++) {
-                if (this._cancelled) throw new Error('Export cancelled');
-                await hybridEncoder.waitForDrain(8);
-
-                // Rolling prefetch at batch boundaries
-                if (segEncoded > 0 && segEncoded % BATCH === 0) {
-                  if (prefetchPromise) await prefetchPromise;
-                  prefetchNext(f + BATCH);
-                }
-
-                await videoCompositor.compositeFrameTo(f, hybridCtx, preset.width, preset.height);
-                const timestampUs = Math.round((encoded / fps) * 1000000);
-
-                // Force keyframe at render segment start (clean IDR boundary)
-                if (f === seg.start) {
-                  hybridEncoder.encodeFrameKeyframe(hybridCanvas, timestampUs);
-                } else {
-                  hybridEncoder.encodeFrame(hybridCanvas, timestampUs);
-                }
-                encoded++;
-                segEncoded++;
-
-                onProgress?.({ stage: 'encoding', progress: encoded / totalFrames,
-                  message: `Hybrid: ${encoded}/${totalFrames} frames` });
               }
 
-              // Flush encoder — ensures no B-frame refs leak into next segment
-              await hybridEncoder.flush();
-              outputParts.push(hybridEncoder.getAndClearEncodedData());
-            }
-
-            if (seg.type === 'conform-copy') {
               onProgress?.({ stage: 'encoding', progress: encoded / totalFrames,
-                message: `Hybrid: ${encoded}/${totalFrames} frames` });
+                message: `Hybrid: ${encoded}/${totalFrames} (${conformPct}% cached)` });
+            } else {
+              // Render segment: composite + encode through ConformWorker's encoder
+              hadRenderSegment = true;
+              await encodeRange(seg.start, seg.end, true);
             }
           }
-
-          hybridEncoder.close();
 
           // Concatenate all segment data
           const totalSize = outputParts.reduce((sum, d) => sum + d.byteLength, 0);
@@ -447,6 +503,8 @@ export const exportPipeline = {
             videoData.set(part, offset);
             offset += part.byteLength;
           }
+
+          logger.info(`[Export] Hybrid complete: ${conformPct}% conform-copy + ${renderPct}% encoded, ${(totalSize / 1024 / 1024).toFixed(1)}MB`);
 
           // Mux
           onProgress?.({ stage: 'muxing', progress: 0, message: 'Packaging video...' });
@@ -459,10 +517,9 @@ export const exportPipeline = {
           });
 
           const mimeType = preset.format === 'webm' ? 'video/webm' : 'video/mp4';
-          logger.info(`[Export] Hybrid complete: ${conformPct}% conform-copy + ${renderPct}% encoded, ${(totalSize / 1024 / 1024).toFixed(1)}MB`);
           return new Blob([outputData], { type: mimeType });
         } finally {
-          hybridEncoder.close();
+          conformEncoder.endExportMode();
           mediaDecoder.endSequentialMode();
           mediaDecoder.setExportMode(false);
         }
